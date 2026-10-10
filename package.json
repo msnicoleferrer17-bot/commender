@@ -1,0 +1,9 @@
+{
+  "name": "commender",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Simple discussion threads with nested replies",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

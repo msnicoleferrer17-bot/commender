@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Threads</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --card:#f9fafb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111827; --fg:#f3f4f6; --muted:#9ca3af; --line:#374151; --accent:#60a5fa; --card:#1f2937; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:24px 16px; }
+  h1 { margin:0 0 16px; font-size:1.5rem; cursor:pointer; }
+  input, textarea, button { font:inherit; color:inherit; }
+  input, textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); margin-bottom:8px; }
+  button { padding:6px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.link { background:none; color:var(--accent); padding:0; font-size:.85rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+  .thread-link { cursor:pointer; }
+  .thread-link:hover { border-color:var(--accent); }
+  .meta { color:var(--muted); font-size:.85rem; }
+  .body { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .children { margin-left:16px; padding-left:12px; border-left:2px solid var(--line); }
+  .reply { margin-top:12px; }
+  form.inline { margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="home">Threads</h1>
+  <div id="app"></div>
+</main>
+<script>
+const app = document.getElementById('app');
+const api = async (url, opts) => {
+  const r = await fetch(url, opts && { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts) });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Request failed');
+  return data;
+};
+const el = (tag, props = {}, ...kids) => {
+  const n = Object.assign(document.createElement(tag), props);
+  kids.flat().forEach((k) => n.append(k));
+  return n;
+};
+const when = (t) => new Date(t).toLocaleString();
+const savedName = () => localStorage.getItem('name') || '';
+
+function replyForm(threadId, parentId, done) {
+  const author = el('input', { placeholder: 'Name (optional)', value: savedName() });
+  const body = el('textarea', { placeholder: 'Write a reply…', rows: 3 });
+  const form = el('form', { className: 'inline' }, author, body, el('button', { type: 'submit' }, 'Reply'));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    localStorage.setItem('name', author.value);
+    try {
+      await api(`/api/threads/${threadId}/replies`, { author: author.value, body: body.value, parentId });
+      done();
+    } catch (err) { alert(err.message); }
+  };
+  return form;
+}
+
+function renderReplies(thread, parentId) {
+  return thread.replies
+    .filter((r) => r.parentId === parentId)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((r) => {
+      const slot = el('div');
+      const btn = el('button', { className: 'link', type: 'button' }, 'Reply');
+      btn.onclick = () => {
+        if (slot.firstChild) return slot.replaceChildren();
+        slot.append(replyForm(thread.id, r.id, () => showThread(thread.id)));
+      };
+      const kids = renderReplies(thread, r.id);
+      return el('div', { className: 'reply' },
+        el('div', { className: 'meta' }, `${r.author} · ${when(r.createdAt)}`),
+        el('div', { className: 'body' }, r.body),
+        btn, slot,
+        kids.length ? el('div', { className: 'children' }, kids) : '');
+    });
+}
+
+async function showThread(id) {
+  const t = await api(`/api/threads/${id}`);
+  app.replaceChildren(
+    el('button', { className: 'link', onclick: showList }, '← All threads'),
+    el('div', { className: 'card' },
+      el('h2', {}, t.title),
+      el('div', { className: 'meta' }, `${t.author} · ${when(t.createdAt)}`),
+      el('div', { className: 'body' }, t.body)),
+    replyForm(t.id, null, () => showThread(t.id)),
+    el('div', {}, renderReplies(t, null)));
+}
+
+async function showList() {
+  const threads = await api('/api/threads');
+  const title = el('input', { placeholder: 'Thread title' });
+  const author = el('input', { placeholder: 'Name (optional)', value: savedName() });
+  const body = el('textarea', { placeholder: 'What do you want to discuss?', rows: 4 });
+  const form = el('form', { className: 'card' }, title, author, body, el('button', { type: 'submit' }, 'New thread'));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    localStorage.setItem('name', author.value);
+    try {
+      const t = await api('/api/threads', { title: title.value, author: author.value, body: body.value });
+      showThread(t.id);
+    } catch (err) { alert(err.message); }
+  };
+  app.replaceChildren(form, ...(threads.length ? threads.map((t) =>
+    el('div', { className: 'card thread-link', onclick: () => showThread(t.id) },
+      el('strong', {}, t.title),
+      el('div', { className: 'meta' }, `${t.author} · ${when(t.createdAt)} · ${t.replyCount} ${t.replyCount === 1 ? 'reply' : 'replies'}`)))
+    : [el('p', { className: 'meta' }, 'No threads yet. Start one above.')]));
+}
+
+document.getElementById('home').onclick = showList;
+showList();
+</script>
+</body>
+</html>
